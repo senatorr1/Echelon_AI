@@ -204,7 +204,7 @@ def main():
     # Header
     st.markdown("""
         <div class="main-header">
-            <h1>🔒 CyberGuardian AI</h1>
+            <h1>🔒 Echelon AI</h1>
             <p style="margin: 0;">Your Intelligent Cybersecurity & Business Consultant</p>
         </div>
     """, unsafe_allow_html=True)
@@ -500,3 +500,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
