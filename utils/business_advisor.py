@@ -21,7 +21,8 @@ class BusinessAdvisor:
             "interests": []
         }
     
-    def process_income_query(self, user_input, conversation_history=None):
+    # --- Change 1A: Pass conversation_history to the main processing function ---
+    def process_income_query(self, user_input, conversation_history=None): 
         """
         Main processing function for income generation queries
         Returns streaming response
@@ -40,17 +41,19 @@ class BusinessAdvisor:
         elif self.conversation_stage == "gathering_info":
             yield from self._gather_student_info(user_input)
         
+        # --- Change 2: Update routing to pass history ---
         # Stage 4: Recommendations
         elif self.conversation_stage == "recommendations":
-            yield from self._provide_recommendations(user_input)
+            yield from self._provide_recommendations(user_input, conversation_history)
         
         # Stage 5: Detailed planning
         elif self.conversation_stage == "action_planning":
-            yield from self._create_action_plan(user_input)
+            yield from self._create_action_plan(user_input, conversation_history)
         
         # Default: general conversation
         else:
-            yield from self._general_business_conversation(user_input)
+            yield from self._general_business_conversation(user_input, conversation_history)
+        # --- End Change 2 ---
     
     def _handle_initial_query(self, user_input):
         """Handle first interaction"""
@@ -136,7 +139,7 @@ Service-based income means using your skills to help others. This is perfect for
 ✅ Flexible schedule
 ✅ Can start immediately
 
-**Let's discover what you can offer. Tell me:**
+**Lets discover what you can offer. Tell me:**
 
 **1. What skills do you have?**
    Examples: Writing, design, coding, teaching, social media, video editing, etc.
@@ -215,9 +218,14 @@ Or just tell me: **"I'm not sure, help me decide"** and I'll guide you through s
         
         # Provide recommendations based on gathered info
         self.conversation_stage = "recommendations"
+        # Since this function calls _provide_recommendations, we update the call here too
+        # The history is available in the calling function's scope, but since the
+        # app.py routes directly to this, we assume history is available in the main call.
+        # We leave this as is because the main call handles the routing logic.
         yield from self._provide_recommendations(user_input)
     
-    def _provide_recommendations(self, user_input):
+    # --- Change 1B: Update signature to accept conversation_history ---
+    def _provide_recommendations(self, user_input, conversation_history=None):
         """Provide personalized recommendations using hybrid approach"""
         path = self.student_profile["path"]
         capital = self.student_profile["capital"]
@@ -266,7 +274,8 @@ If NO services match well, respond with "GENERATE_CUSTOM"
                 # Check if AI wants custom generation
                 if "GENERATE_CUSTOM" in ai_recommendations.upper():
                     # Use custom AI generation
-                    yield from self._generate_custom_opportunities(user_input)
+                    # Pass history here too, as custom generation is a conversation flow step
+                    yield from self._generate_custom_opportunities(user_input, conversation_history)
                     return
                 
                 # Parse AI response to get service indices
@@ -315,7 +324,7 @@ If NO services match well, respond with "GENERATE_CUSTOM"
                 # Fall through to custom generation
             
             # Step 2: If database matching failed, use custom AI generation
-            yield from self._generate_custom_opportunities(user_input)
+            yield from self._generate_custom_opportunities(user_input, conversation_history)
         
         elif path == "business":
             # Recommend businesses based on capital
@@ -352,7 +361,8 @@ Would you like me to show you service opportunities instead? 🛠️
             self.conversation_stage = "action_planning"
             yield response
     
-    def _generate_custom_opportunities(self, user_input):
+    # Update signature to pass history for context
+    def _generate_custom_opportunities(self, user_input, conversation_history=None):
         """Generate custom opportunities using AI for unique skills"""
         try:
             # Build conversation history for context
@@ -442,24 +452,31 @@ Which interests you? Or describe your skills differently and I'll try again!
             context += f"\nIdentified skills: {', '.join(self.student_profile['skills'])}"
         return context if context else ""
     
-    def _create_action_plan(self, user_input):
+    # --- Change 1C: Update signature to accept conversation_history ---
+    def _create_action_plan(self, user_input, conversation_history=None):
         """Create detailed action plan for chosen opportunity"""
         user_lower = user_input.lower()
         
         # Check if user wants custom AI generation
         if any(phrase in user_lower for phrase in ["custom", "unique", "creative", "surprise", "different", "more ideas"]):
-            yield from self._generate_custom_opportunities(user_input)
+            yield from self._generate_custom_opportunities(user_input, conversation_history)
             return
         
+        # --- Change 3: Fix "expand on #1" logic for custom ideas ---
         # Check if user wants to expand on AI-generated option
         expand_match = re.search(r'expand.*?(\d+)', user_lower)
         if expand_match:
-            response = """To create a detailed action plan for that AI-generated option, please **describe it more specifically** or choose from our proven database opportunities.
-
-Say **"show database options"** to see structured opportunities with complete action plans!
-"""
-            yield response
+            # FIX: Route to general conversation, which now uses the full history,
+            # to let the LLM use the chat history to 'expand on' the custom idea.
+            self.conversation_stage = "general_conversation"
+            
+            # Pass the full chat history to the general handler
+            yield from self._general_business_conversation(user_input, full_chat_history=conversation_history)
+            
+            # Revert the stage so other action planning commands still work
+            self.conversation_stage = "action_planning"
             return
+        # --- End Change 3 ---
         
         # Try to match opportunity selection
         selected = None
@@ -542,9 +559,7 @@ Time to First Income: {selected['time_to_first_income']}
 3. **Set a goal** - "I will complete Week 1 by [date]"
 4. **Track progress** - Check off each step as you complete it
 
-**Need help with any specific step? Just ask!** 
-
-Want to explore other opportunities? Say "show me more options"! 🚀
+**Need help with any specific step? Just ask!** Want to explore other opportunities? Say "show me more options"! 🚀
 """
             
             yield response
@@ -565,7 +580,8 @@ What would you like to do? 😊
 """
             yield response
     
-    def _general_business_conversation(self, user_input):
+    # --- Change 1D: Update signature to accept full_chat_history ---
+    def _general_business_conversation(self, user_input, full_chat_history=None):
         """Handle general business questions using AI"""
         try:
             system_prompt = f"""You are a business advisor helping students start income-generating activities.
@@ -578,14 +594,32 @@ Student profile:
 Provide practical, actionable advice. Be encouraging and realistic. Focus on opportunities suitable for Nigerian students.
 """
             
+            # --- Change 4: Build message list using full_chat_history for context ---
+            # Build messages list, starting with the system prompt
+            messages = [
+                {"role": "system", "content": system_prompt},
+            ]
+            
+            # Add recent chat history for context (last 10 messages).
+            if full_chat_history and len(full_chat_history) > 0:
+                recent_history = full_chat_history[-10:] # Use last 10 messages
+                for msg in recent_history:
+                    # Filter out messages that might not be conversational (e.g., from tools)
+                    if msg["role"] in ["user", "assistant"]: 
+                        messages.append({
+                            "role": msg["role"],
+                            "content": msg["content"]
+                        })
+
+            # Add current user input
+            messages.append({"role": "user", "content": user_input})
+            
             response = self.client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_input}
-                ],
+                messages=messages, # <-- Use the full context list here
                 model="llama-3.1-8b-instant",
                 stream=True
             )
+            # --- End Change 4 ---
             
             for chunk in response:
                 if chunk.choices[0].delta.content:
