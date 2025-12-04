@@ -1,132 +1,64 @@
 import os
-import time
 from groq import Groq, APIConnectionError, RateLimitError, APIStatusError
-
-# --- CONFIGURATION ---
-# Ideally, set this in your environment variables. 
-# For now, replace strictly if you are running locally without env vars.
-API_KEY = os.environ.get("GROQ_API_KEY") or "YOUR_GROQ_API_KEY_HERE"
 
 class RobustAgent:
     def __init__(self, api_key, model="mixtral-8x7b-32768"):
         """
-        Initializes the agent with a secure client, a specific model, 
-        and an empty memory buffer.
+        Initializes the agent.
+        :param api_key: Your Groq API Key
+        :param model: The specific AI model to use (default: mixtral-8x7b-32768)
         """
-        if not api_key or "YOUR_GROQ_API_KEY" in api_key:
-            raise ValueError("Please provide a valid Groq API Key.")
-            
         self.client = Groq(api_key=api_key)
         self.model = model
         
-        # SYSTEM PROMPT:
-        # This is the 'personality' and rule set. 
-        # We instruct it to be direct, adaptable, and avoid generic filler.
+        # SYSTEM PROMPT: The core personality
         self.system_instruction = {
             "role": "system",
             "content": (
-                "You are a highly capable, flexible AI assistant. "
-                "1. ADAPTABILITY: Adapt your tone to the user. If they are technical, be technical. "
-                "If they are casual, be casual. "
-                "2. NO FLUFF: Do not start responses with 'As an AI language model' or 'Here is the answer'. "
-                "Just give the answer directly. "
-                "3. CLARIFICATION: If a user prompt is vague (e.g., 'Fix it'), analyze the chat history "
-                "to understand context. If you truly cannot understand, ask a specific clarifying question "
-                "instead of giving a generic response."
+                "You are a highly capable AI assistant suited for business and general tasks. "
+                "1. PRECISE: Be direct. No filler phrases like 'As an AI...'. "
+                "2. CONTEXT AWARE: Remember previous details in this conversation. "
+                "3. ADAPTIVE: If the user asks for code, provide code. If they ask for business advice, provide strategy."
             )
         }
         
-        # MEMORY:
-        # Initialize conversation history with the system instruction.
+        # MEMORY: Starts with just the system instruction
         self.conversation_history = [self.system_instruction]
-
-    def add_to_history(self, role, content):
-        """Adds a message to the memory buffer."""
-        self.conversation_history.append({"role": role, "content": content})
 
     def chat(self, user_input):
         """
-        The main processing loop.
-        1. Accepts user input.
-        2. Appends to history.
-        3. Sends the WHOLE history to the AI (so it has context).
-        4. Receives and stores the answer.
+        Sends a message to the AI and gets a response.
         """
-        # Add user's message to memory
-        self.add_to_history("user", user_input)
+        # 1. Add user message to memory
+        self.conversation_history.append({"role": "user", "content": user_input})
 
         try:
-            # Making the API call with the full context
+            # 2. Call the API with the FULL conversation history
             completion = self.client.chat.completions.create(
                 model=self.model,
                 messages=self.conversation_history,
-                temperature=0.7, # Balanced between creative and precise
-                max_tokens=1024, # Allow for detailed answers
+                temperature=0.7,
+                max_tokens=1024,
                 top_p=1,
                 stream=False,
                 stop=None,
             )
 
-            # Extract the response
+            # 3. Extract response
             bot_response = completion.choices[0].message.content
             
-            # Add the AI's response to memory so it remembers it next time
-            self.add_to_history("assistant", bot_response)
+            # 4. Save AI response to memory (so it remembers next time)
+            self.conversation_history.append({"role": "assistant", "content": bot_response})
             
             return bot_response
 
         except RateLimitError:
-            return "Error: We hit the Groq rate limit. Please wait a moment and try again."
+            return "Error: Rate limit reached. Please wait a moment."
         except APIConnectionError:
-            return "Error: Could not connect to Groq. Check your internet connection."
-        except APIStatusError as e:
-            return f"Error: The API returned a status error: {e}"
+            return "Error: Connection lost. Please check your internet."
         except Exception as e:
-            return f"An unexpected error occurred: {str(e)}"
+            return f"Error: {str(e)}"
 
     def clear_memory(self):
-        """Resets the conversation if things get too cluttered."""
+        """Wipes the conversation history to start fresh."""
         self.conversation_history = [self.system_instruction]
-        print("\n[Memory Wiped: Starting Fresh Context]\n")
-
-# --- EXECUTION LOOP ---
-
-def main():
-    print("Initializing Robust Agent...")
-    try:
-        # Instantiate the agent
-        agent = RobustAgent(API_KEY)
-        print(f"Agent Ready. Using model: {agent.model}")
-        print("Type 'quit' to exit, or 'clear' to reset memory.\n")
-
-        while True:
-            user_input = input("You: ").strip()
-
-            if user_input.lower() in ["quit", "exit"]:
-                print("Shutting down.")
-                break
-            
-            if user_input.lower() == "clear":
-                agent.clear_memory()
-                continue
-            
-            if not user_input:
-                print("Please type something.")
-                continue
-
-            # Get response
-            print("Agent is thinking...", end="\r")
-            response = agent.chat(user_input)
-            
-            # Clear the "thinking" line and print response
-            print(" " * 20, end="\r") 
-            print(f"Agent: {response}\n")
-            print("-" * 30)
-
-    except ValueError as ve:
-        print(f"Configuration Error: {ve}")
-    except KeyboardInterrupt:
-        print("\nProgram interrupted by user.")
-
-if __name__ == "__main__":
-    main()
