@@ -8,10 +8,15 @@ class RobustAgent:
         :param api_key: Your Groq API Key
         :param model: The specific AI model to use (default: mixtral-8x7b-32768)
         """
+        # Ensure API Key is present
+        if not api_key:
+            raise ValueError("API Key is missing. Please check your configuration.")
+
         self.client = Groq(api_key=api_key)
         self.model = model
         
         # SYSTEM PROMPT: The core personality
+        # We keep this tight and specific to avoid "generic" responses.
         self.system_instruction = {
             "role": "system",
             "content": (
@@ -45,7 +50,10 @@ class RobustAgent:
             )
 
             # 3. Extract response
-            bot_response = completion.choices[0].message.content
+            if completion.choices and completion.choices[0].message:
+                bot_response = completion.choices[0].message.content
+            else:
+                bot_response = "Error: Received empty response from AI."
             
             # 4. Save AI response to memory (so it remembers next time)
             self.conversation_history.append({"role": "assistant", "content": bot_response})
@@ -56,8 +64,10 @@ class RobustAgent:
             return "Error: Rate limit reached. Please wait a moment."
         except APIConnectionError:
             return "Error: Connection lost. Please check your internet."
+        except APIStatusError as e:
+            return f"Error: The API returned a status error: {e}"
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: An unexpected error occurred: {str(e)}"
 
     def clear_memory(self):
         """Wipes the conversation history to start fresh."""
