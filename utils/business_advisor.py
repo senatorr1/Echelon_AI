@@ -21,7 +21,7 @@ class BusinessAdvisor:
             "interests": []
         }
     
-    # --- Change 1A: Pass conversation_history to the main processing function ---
+    # --- Structural Fix: Passing conversation_history ---
     def process_income_query(self, user_input, conversation_history=None): 
         """
         Main processing function for income generation queries
@@ -31,6 +31,7 @@ class BusinessAdvisor:
         
         # Stage 1: Initial greeting / intent detection
         if self.conversation_stage == "initial":
+            # Note: This calls the MODIFIED function with enhanced flexibility
             yield from self._handle_initial_query(user_input)
         
         # Stage 2: Path selection (business vs service)
@@ -39,9 +40,9 @@ class BusinessAdvisor:
         
         # Stage 3: Information gathering
         elif self.conversation_stage == "gathering_info":
-            yield from self._gather_student_info(user_input)
+            # Note: _gather_student_info internally calls _provide_recommendations
+            yield from self._gather_student_info(user_input, conversation_history)
         
-        # --- Change 2: Update routing to pass history ---
         # Stage 4: Recommendations
         elif self.conversation_stage == "recommendations":
             yield from self._provide_recommendations(user_input, conversation_history)
@@ -50,23 +51,74 @@ class BusinessAdvisor:
         elif self.conversation_stage == "action_planning":
             yield from self._create_action_plan(user_input, conversation_history)
         
-        # Default: general conversation
+        # Default: general conversation (handles context-aware conversation)
         else:
             yield from self._general_business_conversation(user_input, conversation_history)
-        # --- End Change 2 ---
     
+    # --- FLEXIBILITY FIX: Enhanced _handle_initial_query for direct routing ---
     def _handle_initial_query(self, user_input):
-        """Handle first interaction"""
+        """Handle first interaction with enhanced flexibility and direct routing"""
         user_lower = user_input.lower()
         
-        # Detect income-related intent
+        # Expanded keywords to catch various ways a user might ask for income/help
         income_keywords = ["money", "income", "earn", "business", "service", "broke", 
-                          "financial", "hustle", "startup", "freelance", "side"]
+                          "financial", "hustle", "startup", "freelance", "side",
+                          "funds", "bills", "job", "work", "consult", "advise", "capital", "skill"]
         
         has_intent = any(keyword in user_lower for keyword in income_keywords)
         
         if has_intent:
-            response = """👋 **Welcome to Income Generation Guidance!**
+            # Check for direct intent (Business or Service) to skip the 1, 2, 3 menu
+            is_business_intent = any(word in user_lower for word in ["business", "startup", "selling", "product", "e-commerce"])
+            is_service_intent = any(word in user_lower for word in ["service", "skills", "freelance", "consult", "tutoring", "design", "writing", "coding"])
+
+            if is_business_intent and not is_service_intent:
+                # Route directly to gathering info for business (Capital/Interests)
+                self.student_profile["path"] = "business"
+                self.conversation_stage = "gathering_info"
+                response = """🏢 **Great! You're ready to explore business opportunities.**
+
+Businesses typically involve buying/selling products or running operations. Let's get straight to what you need:
+
+**1. How much capital (money) can you invest to start?**
+   - ₦0 (no money available)
+   - ₦5,000 - ₦20,000 (small amount)
+   - ₦20,000 - ₦50,000 (moderate)
+   - ₦50,000+ (good starting capital)
+
+**2. What type of business interests you?**
+   - Online (e-commerce, dropshipping)
+   - Physical products (clothing, accessories, food)
+   - Not sure
+
+*Please share your answers, and I'll recommend suitable businesses!*
+"""
+                yield response
+                return
+
+            elif is_service_intent and not is_business_intent:
+                # Route directly to gathering info for services (Skills)
+                self.student_profile["path"] = "service"
+                self.conversation_stage = "gathering_info"
+                response = """🛠️ **Excellent choice! Services need minimal capital.**
+
+Service-based income means using your skills to help others. Let's discover what you can offer:
+
+**1. What skills do you have?**
+   Examples: Writing, design, coding, teaching, social media, video editing, etc.
+
+**2. What do people often ask you for help with?**
+
+**3. What subjects or activities do you excel at?**
+
+*Share whatever comes to mind - don't worry if you think you have "no skills"! We'll figure it out together.* 😊
+"""
+                yield response
+                return
+
+            else:
+                # If intent is general (or mixed), proceed to 1, 2, 3 selection
+                response = """👋 **Welcome to Income Generation Guidance!**
 
 I'm here to help you start making money as a student. I can guide you whether you want to:
 
@@ -82,10 +134,10 @@ I'm here to help you start making money as a student. I can guide you whether yo
 
 *(Just type 1, 2, 3, or tell me in your own words)*
 """
-            self.conversation_stage = "path_selection"
-            yield response
+                self.conversation_stage = "path_selection"
+                yield response
         else:
-            # General greeting
+            # If no strong intent found, stick to the welcome/examples prompt
             response = """Hello! 👋 
 
 I'm your **Business & Income Generation Advisor**. I help students like you discover ways to make money through:
@@ -94,8 +146,8 @@ I'm your **Business & Income Generation Advisor**. I help students like you disc
 🛠️ Offering services  
 💡 Monetizing your skills
 
-**Want to get started? Just tell me:**
-- "I want to make money"
+**Want to get started? Just tell me, using your own words:**
+- "I need some spare funds to pay bills"
 - "Help me start a business"
 - "What services can I offer?"
 - Or ask any income-related question!
@@ -103,6 +155,7 @@ I'm your **Business & Income Generation Advisor**. I help students like you disc
 How can I help you today? 😊
 """
             yield response
+    # --- End FLEXIBILITY FIX 1 ---
     
     def _handle_path_selection(self, user_input):
         """Handle business vs service selection"""
@@ -139,7 +192,7 @@ Service-based income means using your skills to help others. This is perfect for
 ✅ Flexible schedule
 ✅ Can start immediately
 
-**Lets discover what you can offer. Tell me:**
+**Let's discover what you can offer. Tell me:**
 
 **1. What skills do you have?**
    Examples: Writing, design, coding, teaching, social media, video editing, etc.
@@ -148,7 +201,7 @@ Service-based income means using your skills to help others. This is perfect for
 
 **3. What subjects or activities do you excel at?**
 
-*Share whatever comes to mind - don't worry if you think you have "no skills"! We'll figure it out together.* 😊
+*Share whatever comes to mind - don't worry if you think you think you have "no skills"! We'll figure it out together.* 😊
 """
             self.conversation_stage = "gathering_info"
             yield response
@@ -195,7 +248,7 @@ Or just tell me: **"I'm not sure, help me decide"** and I'll guide you through s
 """
             yield response
     
-    def _gather_student_info(self, user_input):
+    def _gather_student_info(self, user_input, conversation_history=None):
         """Gather information about student's situation"""
         user_lower = user_input.lower()
         
@@ -218,13 +271,9 @@ Or just tell me: **"I'm not sure, help me decide"** and I'll guide you through s
         
         # Provide recommendations based on gathered info
         self.conversation_stage = "recommendations"
-        # Since this function calls _provide_recommendations, we update the call here too
-        # The history is available in the calling function's scope, but since the
-        # app.py routes directly to this, we assume history is available in the main call.
-        # We leave this as is because the main call handles the routing logic.
-        yield from self._provide_recommendations(user_input)
+        yield from self._provide_recommendations(user_input, conversation_history)
     
-    # --- Change 1B: Update signature to accept conversation_history ---
+    # --- Structural Fix: Passing conversation_history ---
     def _provide_recommendations(self, user_input, conversation_history=None):
         """Provide personalized recommendations using hybrid approach"""
         path = self.student_profile["path"]
@@ -452,7 +501,7 @@ Which interests you? Or describe your skills differently and I'll try again!
             context += f"\nIdentified skills: {', '.join(self.student_profile['skills'])}"
         return context if context else ""
     
-    # --- Change 1C: Update signature to accept conversation_history ---
+    # --- Structural Fix: Passing conversation_history for context retention ---
     def _create_action_plan(self, user_input, conversation_history=None):
         """Create detailed action plan for chosen opportunity"""
         user_lower = user_input.lower()
@@ -462,7 +511,7 @@ Which interests you? Or describe your skills differently and I'll try again!
             yield from self._generate_custom_opportunities(user_input, conversation_history)
             return
         
-        # --- Change 3: Fix "expand on #1" logic for custom ideas ---
+        # --- Context Retention Fix: Handle "expand on #1" by routing to context-aware general chat ---
         # Check if user wants to expand on AI-generated option
         expand_match = re.search(r'expand.*?(\d+)', user_lower)
         if expand_match:
@@ -476,7 +525,7 @@ Which interests you? Or describe your skills differently and I'll try again!
             # Revert the stage so other action planning commands still work
             self.conversation_stage = "action_planning"
             return
-        # --- End Change 3 ---
+        # --- End Context Retention Fix ---
         
         # Try to match opportunity selection
         selected = None
@@ -519,13 +568,13 @@ Time to First Income: {selected['time_to_first_income']}
 {chr(10).join(f'✓ {skill}' for skill in selected['skills_needed'])}
 
 **🛠️ TOOLS YOU'LL NEED**
-{chr(10).join(f'• {tool}' for tool in selected['tools'])}
+{chr(10).join(f'• {tool}' for tool in selected.get('tools', ['Basic computer', 'Smartphone']))}
 
 ═══════════════════════════════════════
 
 **🚀 STEP-BY-STEP ACTION PLAN:**
 
-{chr(10).join(f'{i}. {step}' for i, step in enumerate(selected['action_plan'], 1))}
+{chr(10).join(f'{i}. {step}' for i, step in enumerate(selected.get('action_plan', selected.get('startup_steps', [])), 1))}
 
 ═══════════════════════════════════════
 
@@ -580,21 +629,21 @@ What would you like to do? 😊
 """
             yield response
     
-    # --- Change 1D: Update signature to accept full_chat_history ---
+    # --- Structural Fix: Passing conversation_history for context retention ---
     def _general_business_conversation(self, user_input, full_chat_history=None):
         """Handle general business questions using AI"""
         try:
-            system_prompt = f"""You are a business advisor helping students start income-generating activities.
+            # --- General Flexibility Fix 2: Enhanced System Prompt ---
+            system_prompt = f"""You are a highly flexible, conversational business advisor helping students start income-generating activities. Your primary goal is to provide practical, actionable, and encouraging advice.
 
 Student profile:
 - Path: {self.student_profile.get('path', 'undecided')}
 - Capital: ₦{self.student_profile.get('capital', 0):,}
 - Skills: {', '.join(self.student_profile.get('skills', ['unknown']))}
 
-Provide practical, actionable advice. Be encouraging and realistic. Focus on opportunities suitable for Nigerian students.
+KEY INSTRUCTION: Be extremely flexible in understanding the user's input. Do not revert to generic questions if a clear intent (like asking for funds or bills help) is present. Focus on opportunities suitable for Nigerian students.
 """
             
-            # --- Change 4: Build message list using full_chat_history for context ---
             # Build messages list, starting with the system prompt
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -619,7 +668,6 @@ Provide practical, actionable advice. Be encouraging and realistic. Focus on opp
                 model="llama-3.1-8b-instant",
                 stream=True
             )
-            # --- End Change 4 ---
             
             for chunk in response:
                 if chunk.choices[0].delta.content:
@@ -627,6 +675,7 @@ Provide practical, actionable advice. Be encouraging and realistic. Focus on opp
         
         except Exception as e:
             yield f"I encountered an error: {str(e)}. Please try rephrasing your question!"
+    # --- End Structural Fix ---
     
     def reset_conversation(self):
         """Reset conversation state for new query"""
