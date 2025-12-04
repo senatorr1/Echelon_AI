@@ -1,86 +1,132 @@
 import os
-import re
-from groq import Groq
-from utils.security_tools import *
+import time
+from groq import Groq, APIConnectionError, RateLimitError, APIStatusError
 
-class CyberSecurityAgent:
-    def __init__(self):
-        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        # Removed self.conversation_history = [] as it is passed via Streamlit
-    
-    def process_query(self, user_input, full_chat_history=None):
-        """Process user query with conversation memory and flexible tool routing"""
-        try:
-            # Route to appropriate tool
-            user_lower = user_input.lower()
+# --- CONFIGURATION ---
+# Ideally, set this in your environment variables. 
+# For now, replace strictly if you are running locally without env vars.
+API_KEY = os.environ.get("GROQ_API_KEY") or "YOUR_GROQ_API_KEY_HERE"
+
+class RobustAgent:
+    def __init__(self, api_key, model="mixtral-8x7b-32768"):
+        """
+        Initializes the agent with a secure client, a specific model, 
+        and an empty memory buffer.
+        """
+        if not api_key or "YOUR_GROQ_API_KEY" in api_key:
+            raise ValueError("Please provide a valid Groq API Key.")
             
-            # --- FLEXIBILITY FIX 3: Broader Password Check keywords ---
-            if "password" in user_lower and any(word in user_lower for word in ["check", "strength", "analyze", "test", "how good", "score"]):
-                # Extract password from query
-                password_match = re.search(r'["\']([^"\']+)["\']', user_input)
-                if password_match:
-                    password = password_match.group(1)
-                    score, feedback = check_password_strength(password)
-                    response = f"**Password Analysis:**\nStrength Score: {score}%\n\n**Recommendations:**\n" + "\n".join(f"• {item}" for item in feedback)
-                    yield response
-                    return
-            
-            # --- FLEXIBILITY FIX 4: Broader Phishing Check keywords ---
-            elif any(word in user_lower for word in ["phishing", "email", "scam", "suspicious", "fraud", "malicious", "sender"]):
-                email_match = re.search(r'["\']([^"\']+)["\']', user_input)
-                if email_match:
-                    email_text = email_match.group(1)
-                    result = analyze_phishing_email(email_text)
-                    response = f"**Phishing Analysis:**\nRisk Level: {result['risk_level']}\n\n{result['analysis']}"
-                    yield response
-                    return
-            
-            # --- FLEXIBILITY FIX 5: Broader WiFi Check keywords ---
-            elif any(word in user_lower for word in ["wifi", "network", "hotspot", "wireless", "internet security"]):
-                response = "For WiFi security:\n• Use VPN on public networks\n• Avoid banking on public WiFi\n• Enable firewall\n• Use WPA3 encryption"
-                yield response
-                return
-            
-            # General Cybersecurity Advice (default LLM path)
-            
-            # Build conversation context from chat history
-            messages = [
-                {
-                    "role": "system",
-                    "content": """You are a highly flexible and knowledgeable cybersecurity expert. Provide helpful, accurate advice about cybersecurity, online safety, and digital protection.
-                    
-KEY INSTRUCTION: Be extremely flexible in understanding the user's question and maintain context from the history provided.
-"""
-                }
-            ]
-            
-            # Add recent chat history for context (last 10 messages)
-            if full_chat_history and len(full_chat_history) > 0:
-                recent_history = full_chat_history[-10:]  # Last 10 messages
-                for msg in recent_history:
-                    # Only add conversational roles
-                    if msg["role"] in ["user", "assistant"]:
-                         messages.append({
-                            "role": msg["role"],
-                            "content": msg["content"]
-                        })
-            
-            # Add current user input
-            messages.append({
-                "role": "user",
-                "content": user_input
-            })
-            
-            # Default: Use Groq for general questions with conversation memory
-            response = self.client.chat.completions.create(
-                messages=messages,
-                model="llama-3.1-8b-instant",
-                stream=True
+        self.client = Groq(api_key=api_key)
+        self.model = model
+        
+        # SYSTEM PROMPT:
+        # This is the 'personality' and rule set. 
+        # We instruct it to be direct, adaptable, and avoid generic filler.
+        self.system_instruction = {
+            "role": "system",
+            "content": (
+                "You are a highly capable, flexible AI assistant. "
+                "1. ADAPTABILITY: Adapt your tone to the user. If they are technical, be technical. "
+                "If they are casual, be casual. "
+                "2. NO FLUFF: Do not start responses with 'As an AI language model' or 'Here is the answer'. "
+                "Just give the answer directly. "
+                "3. CLARIFICATION: If a user prompt is vague (e.g., 'Fix it'), analyze the chat history "
+                "to understand context. If you truly cannot understand, ask a specific clarifying question "
+                "instead of giving a generic response."
             )
+        }
+        
+        # MEMORY:
+        # Initialize conversation history with the system instruction.
+        self.conversation_history = [self.system_instruction]
+
+    def add_to_history(self, role, content):
+        """Adds a message to the memory buffer."""
+        self.conversation_history.append({"role": role, "content": content})
+
+    def chat(self, user_input):
+        """
+        The main processing loop.
+        1. Accepts user input.
+        2. Appends to history.
+        3. Sends the WHOLE history to the AI (so it has context).
+        4. Receives and stores the answer.
+        """
+        # Add user's message to memory
+        self.add_to_history("user", user_input)
+
+        try:
+            # Making the API call with the full context
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=self.conversation_history,
+                temperature=0.7, # Balanced between creative and precise
+                max_tokens=1024, # Allow for detailed answers
+                top_p=1,
+                stream=False,
+                stop=None,
+            )
+
+            # Extract the response
+            bot_response = completion.choices[0].message.content
             
-            for chunk in response:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-                        
+            # Add the AI's response to memory so it remembers it next time
+            self.add_to_history("assistant", bot_response)
+            
+            return bot_response
+
+        except RateLimitError:
+            return "Error: We hit the Groq rate limit. Please wait a moment and try again."
+        except APIConnectionError:
+            return "Error: Could not connect to Groq. Check your internet connection."
+        except APIStatusError as e:
+            return f"Error: The API returned a status error: {e}"
         except Exception as e:
-            yield f"I encountered an error: {str(e)}. Please check your API key and try again."
+            return f"An unexpected error occurred: {str(e)}"
+
+    def clear_memory(self):
+        """Resets the conversation if things get too cluttered."""
+        self.conversation_history = [self.system_instruction]
+        print("\n[Memory Wiped: Starting Fresh Context]\n")
+
+# --- EXECUTION LOOP ---
+
+def main():
+    print("Initializing Robust Agent...")
+    try:
+        # Instantiate the agent
+        agent = RobustAgent(API_KEY)
+        print(f"Agent Ready. Using model: {agent.model}")
+        print("Type 'quit' to exit, or 'clear' to reset memory.\n")
+
+        while True:
+            user_input = input("You: ").strip()
+
+            if user_input.lower() in ["quit", "exit"]:
+                print("Shutting down.")
+                break
+            
+            if user_input.lower() == "clear":
+                agent.clear_memory()
+                continue
+            
+            if not user_input:
+                print("Please type something.")
+                continue
+
+            # Get response
+            print("Agent is thinking...", end="\r")
+            response = agent.chat(user_input)
+            
+            # Clear the "thinking" line and print response
+            print(" " * 20, end="\r") 
+            print(f"Agent: {response}\n")
+            print("-" * 30)
+
+    except ValueError as ve:
+        print(f"Configuration Error: {ve}")
+    except KeyboardInterrupt:
+        print("\nProgram interrupted by user.")
+
+if __name__ == "__main__":
+    main()
