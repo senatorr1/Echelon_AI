@@ -9,12 +9,13 @@ class CyberSecurityAgent:
         self.conversation_history = []
     
     def process_query(self, user_input, full_chat_history=None):
-        """Process user query with conversation memory"""
+        """Process user query with conversation memory and flexible tool routing"""
         try:
-            # Route to appropriate tool
+            # Route to appropriate tool (made more flexible)
             user_lower = user_input.lower()
             
-            if "password" in user_lower and "check" in user_lower:
+            # --- FLEXIBILITY FIX 3: Broader Password Check keywords ---
+            if "password" in user_lower and any(word in user_lower for word in ["check", "strength", "analyze", "test", "how good"]):
                 # Extract password from query
                 password_match = re.search(r'["\']([^"\']+)["\']', user_input)
                 if password_match:
@@ -24,7 +25,8 @@ class CyberSecurityAgent:
                     yield response
                     return
             
-            elif "phishing" in user_lower or "email" in user_lower:
+            # --- FLEXIBILITY FIX 4: Broader Phishing Check keywords ---
+            elif any(word in user_lower for word in ["phishing", "email", "scam", "suspicious", "fraud"]):
                 email_match = re.search(r'["\']([^"\']+)["\']', user_input)
                 if email_match:
                     email_text = email_match.group(1)
@@ -33,23 +35,21 @@ class CyberSecurityAgent:
                     yield response
                     return
             
-            elif "wifi" in user_lower:
-                response = "For WiFi security:\n• Use VPN on public networks\n• Avoid banking on public WiFi\n• Enable firewall\n• Use WPA3 encryption"
-                yield response
-                return
+            # General Cybersecurity Advice (default LLM path)
             
             # Build conversation context from chat history
             messages = [
                 {
                     "role": "system",
-                    "content": """You are a cybersecurity expert. Provide helpful, accurate advice about cybersecurity, online safety, and digital protection.
-
+                    "content": """You are a highly flexible and knowledgeable cybersecurity expert. Provide helpful, accurate advice about cybersecurity, online safety, and digital protection.
+                    
 Key instructions:
-- Remember context from previous messages in this conversation
-- Reference earlier points when relevant
-- Provide practical cybersecurity guidance
-- Be concise but informative
-- If the user asks "what did I say earlier" or similar, reference their previous messages"""
+- Remember context from previous messages in this conversation.
+- Reference earlier points when relevant.
+- Be concise but informative.
+- If the user asks a general question, answer it directly without asking for mode confirmation.
+- If a tool trigger is attempted but fails (e.g., no password provided), instruct the user politely on the correct format.
+"""
                 }
             ]
             
@@ -57,10 +57,12 @@ Key instructions:
             if full_chat_history and len(full_chat_history) > 0:
                 recent_history = full_chat_history[-10:]  # Last 10 messages
                 for msg in recent_history:
-                    messages.append({
-                        "role": msg["role"],
-                        "content": msg["content"]
-                    })
+                    # Only add conversational roles
+                    if msg["role"] in ["user", "assistant"]:
+                         messages.append({
+                            "role": msg["role"],
+                            "content": msg["content"]
+                        })
             
             # Add current user input
             messages.append({
